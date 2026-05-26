@@ -42,6 +42,7 @@
 ompl::geometric::AORRTC::AORRTC(const base::SpaceInformationPtr &si) : base::Planner(si, "AORRTC")
 {
     specs_.approximateSolutions = true;
+    specs_.canReportIntermediateSolutions = true;
     specs_.directed = true;
 }
 
@@ -70,6 +71,10 @@ void ompl::geometric::AORRTC::setup()
     aox_planner->setProblemDefinition(pdef_);
     aox_planner->setName("AOXRRTConnect");
     aox_planner->setRange(getRange());
+    if (maxInternalSamples_ > 0)
+        aox_planner->setMaxInternalSamples(maxInternalSamples_);
+    if (maxInternalVertices_ > 0)
+        aox_planner->setMaxInternalVertices(maxInternalVertices_);
 
     aox_planner->setup();
 
@@ -102,6 +107,24 @@ void ompl::geometric::AORRTC::freeMemory()
     aox_planner->clear();
 }
 
+void ompl::geometric::AORRTC::setMaxInternalSamples(std::size_t value)
+{
+    if (value == 0)
+        return;
+    maxInternalSamples_ = value;
+    if (aox_planner)
+        aox_planner->setMaxInternalSamples(value);
+}
+
+void ompl::geometric::AORRTC::setMaxInternalVertices(std::size_t value)
+{
+    if (value == 0)
+        return;
+    maxInternalVertices_ = value;
+    if (aox_planner)
+        aox_planner->setMaxInternalVertices(value);
+}
+
 void ompl::geometric::AORRTC::simplifySolution(const base::PathPtr &p, const base::PlannerTerminationCondition &ptc)
 {
     if (pdef_)
@@ -118,6 +141,19 @@ void ompl::geometric::AORRTC::simplifySolution(const base::PathPtr &p, const bas
 
 ompl::base::PlannerStatus ompl::geometric::AORRTC::solve(const base::PlannerTerminationCondition &ptc)
 {
+    const base::ReportIntermediateSolutionFn intermediateSolutionCallback =
+        pdef_->getIntermediateSolutionCallback();
+    const auto reportIntermediateSolution = [&](const base::PathPtr &path) {
+        if (!intermediateSolutionCallback || !path)
+            return;
+        const auto &geometricPath = static_cast<const PathGeometric &>(*path);
+        std::vector<const base::State *> states;
+        states.reserve(geometricPath.getStateCount());
+        for (std::size_t i = 0; i < geometricPath.getStateCount(); ++i)
+            states.push_back(geometricPath.getState(i));
+        intermediateSolutionCallback(this, states, ompl::base::Cost(path->length()));
+    };
+
     do
     {
         /* If we already have a solution (and therefore a reasonable cost range) */
@@ -141,6 +177,7 @@ ompl::base::PlannerStatus ompl::geometric::AORRTC::solve(const base::PlannerTerm
                     bestCost_ = ompl::base::Cost(path->length());
 
                     pdef_->addSolutionPath(bestPath_, false, 0.0, getName());
+                    reportIntermediateSolution(bestPath_);
                 }
 
                 /* Simplify our solution */
@@ -155,6 +192,7 @@ ompl::base::PlannerStatus ompl::geometric::AORRTC::solve(const base::PlannerTerm
                     bestCost_ = ompl::base::Cost(path->length());
 
                     pdef_->addSolutionPath(bestPath_, false, 0.0, getName());
+                    reportIntermediateSolution(bestPath_);
                 }
             }
         }
@@ -172,6 +210,7 @@ ompl::base::PlannerStatus ompl::geometric::AORRTC::solve(const base::PlannerTerm
 
                 bestCost_ = ompl::base::Cost(bestPath_->length());
                 pdef_->addSolutionPath(bestPath_, false, 0.0, getName());
+                reportIntermediateSolution(bestPath_);
 
                 simplifySolution(bestPath_, ptc);
                 OMPL_INFORM("%s: Initial search simplified to cost %.5f", getName().c_str(),
@@ -179,6 +218,7 @@ ompl::base::PlannerStatus ompl::geometric::AORRTC::solve(const base::PlannerTerm
 
                 bestCost_ = ompl::base::Cost(bestPath_->length());
                 pdef_->addSolutionPath(bestPath_, false, 0.0, getName());
+                reportIntermediateSolution(bestPath_);
             }
         }
 

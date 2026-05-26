@@ -465,6 +465,32 @@ ompl::base::PlannerStatus ompl::geometric::AOXRRTConnect::solve(const base::Plan
                 for (auto &i : mpath2)
                     path->append(i->state);
 
+                const auto endpointsMatch = [this](const PathGeometric &candidate) {
+                    constexpr double eps = 1e-9;
+                    return candidate.getStateCount() >= 2 &&
+                           si_->distance(candidate.getState(0), startState) <= eps &&
+                           si_->distance(candidate.getState(candidate.getStateCount() - 1), goalState) <= eps;
+                };
+                if (!endpointsMatch(*path))
+                {
+                    if (path->getStateCount() >= 2 &&
+                        si_->distance(path->getState(0), goalState) <= 1e-9 &&
+                        si_->distance(path->getState(path->getStateCount() - 1), startState) <= 1e-9)
+                    {
+                        path->reverse();
+                    }
+                    else if (si_->checkMotion(startState, goalState))
+                    {
+                        path = std::make_shared<PathGeometric>(si_);
+                        path->append(startState);
+                        path->append(goalState);
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+
                 pdef_->addSolutionPath(path, false, 0.0, getName());
                 foundPath = path;
 
@@ -504,10 +530,12 @@ ompl::base::PlannerStatus ompl::geometric::AOXRRTConnect::solve(const base::Plan
 
         /* Sample random states until we find a valid and useful sample */
         bool placed_sampled = false;
-        double c_rand;
-        double c_range;
+        double c_rand = 0.0;
+        double c_range = 0.0;
         do
         {
+            if (internalResetCondition())
+                break;
             placed_sampled = sampler_->sampleUniform(rstate, bestCost_);
             sampleAttempts++;
 
@@ -521,7 +549,10 @@ ompl::base::PlannerStatus ompl::geometric::AOXRRTConnect::solve(const base::Plan
             c_range = bestCost_.value() - f_hat;
             c_rand = (cost_sample * c_range) + g_hat;
 
-        } while (!ptc && (!placed_sampled || c_range < 0));
+        } while (!ptc && !internalResetCondition() &&
+                 (!placed_sampled || c_range < 0));
+        if (!placed_sampled || c_range < 0 || internalResetCondition())
+            break;
         rmotion->cost = c_rand;
 
         /* Extend towards our new sample */

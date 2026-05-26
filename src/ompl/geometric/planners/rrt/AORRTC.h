@@ -121,6 +121,10 @@ namespace ompl
             /** \brief Retrieve the best exact-solution cost found.*/
             ompl::base::Cost bestCost() const;
 
+            void setMaxInternalSamples(std::size_t value);
+
+            void setMaxInternalVertices(std::size_t value);
+
         protected:
             /** \brief The random number generator */
             RNG rng_;
@@ -134,6 +138,10 @@ namespace ompl
             double maxDistance_{0.};
 
             double inflationFactor_{1.};
+
+            std::size_t maxInternalSamples_{0};
+
+            std::size_t maxInternalVertices_{0};
 
             /** \brief The instance of the path simplifier */
             PathSimplifierPtr psk_;

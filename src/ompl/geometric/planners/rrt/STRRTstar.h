@@ -124,6 +124,16 @@ namespace ompl
             /** \brief Whether the state space is sampled uniformly or centered at lower time values. */
             void setSampleUniformForUnboundedTime(bool uniform);
 
+            /** \brief Minimum goal time that sampled goal states must satisfy. */
+            void setMinimumGoalTime(double t);
+            double getMinimumGoalTime() const;
+
+            /** \brief When true, return immediately upon finding the first solution instead of
+             * continuing to optimize until the time limit. Also skips the post-solution tree
+             * pruning and goal-tree reconnection pass (so the first feasible path is kept as-is). */
+            void setReturnFirstSolution(bool v);
+            bool getReturnFirstSolution() const { return returnFirstSolution_; }
+
             void setup() override;
 
             /** \brief A nearest-neighbor datastructure representing a tree of motions */
@@ -224,6 +234,9 @@ namespace ompl
             /** \brief Upper bound for the time up to which solutions are searched for. */
             double upperTimeBound_;
 
+            /** \brief Lower bound for sampled goal times. */
+            double minimumGoalTime_ = 0.0;
+
             /** \brief The factor to which found solution times need to be reduced compared to minimum time, (0, 1]. */
             double optimumApproxFactor_ = 1.0;
 
@@ -319,6 +332,9 @@ namespace ompl
             /** \brief Whether the samples are uniformly distributed over the whole space or are centered at lower
              * times. */
             bool sampleUniformForUnboundedTime_ = true;
+
+            /** \brief When true, return immediately upon finding the first solution. */
+            bool returnFirstSolution_ = false;
 
             /** \brief The ratio, a goal state is sampled compared to the size of the goal tree. */
             int goalStateSampleRatio_ = 4;

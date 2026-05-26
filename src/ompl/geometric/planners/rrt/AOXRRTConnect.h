@@ -150,6 +150,22 @@ namespace ompl
 
             void setPathCost(double pc);
 
+            void setMaxInternalSamples(std::size_t value)
+            {
+                if (value == 0)
+                    return;
+                maxInternalSamples = value;
+                maxInternalSamplesIncrement = value;
+            }
+
+            void setMaxInternalVertices(std::size_t value)
+            {
+                if (value == 0)
+                    return;
+                maxInternalVertices = value;
+                maxInternalVerticesIncrement = value;
+            }
+
         protected:
             /** \brief Representation of a motion */
             class Motion

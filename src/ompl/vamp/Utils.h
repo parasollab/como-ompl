@@ -26,7 +26,9 @@ namespace ompl::vamp
             aligned_buffer[i] = static_cast<float>(as->values[i]);
         }
 
-        return Configuration(aligned_buffer.data());
+        // Use the std::array constructor so padded SIMD lanes are zero-filled when
+        // num_scalars is not a multiple of VectorWidth (see vamp::Vector pointer ctor).
+        return Configuration(aligned_buffer);
     }
 
     /// Convert a VAMP Configuration to an OMPL state

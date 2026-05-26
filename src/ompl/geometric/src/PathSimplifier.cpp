@@ -44,6 +44,9 @@
 #include <cmath>
 #include <map>
 #include <utility>
+#include <chrono>
+#include <iostream>
+#include <cstring>
 
 ompl::geometric::PathSimplifier::PathSimplifier(base::SpaceInformationPtr si, const base::GoalPtr &goal,
                                                 const base::OptimizationObjectivePtr &obj)
@@ -87,10 +90,19 @@ void ompl::geometric::PathSimplifier::smoothBSpline(PathGeometric &path, unsigne
 
     base::State *temp1 = si->allocState();
     base::State *temp2 = si->allocState();
+    const char *trace_env = std::getenv("MR_PATH_SIMPLIFY_TRACE");
+    const bool trace = trace_env && trace_env[0] != '\0' && std::strcmp(trace_env, "0") != 0;
+    std::uint64_t check_motion_calls = 0;
 
     for (unsigned int s = 0; s < maxSteps; ++s)
     {
+        if (trace)
+            std::cerr << "[PathSimplifier] smoothBSpline step=" << (s + 1)
+                      << " states_before_subdivide=" << states.size() << "\n";
         path.subdivide();
+        if (trace)
+            std::cerr << "[PathSimplifier] smoothBSpline step=" << (s + 1)
+                      << " states_after_subdivide=" << states.size() << "\n";
 
         unsigned int i = 2, u = 0, n1 = states.size() - 1;
         while (i < n1)
@@ -100,7 +112,31 @@ void ompl::geometric::PathSimplifier::smoothBSpline(PathGeometric &path, unsigne
                 si->getStateSpace()->interpolate(states[i - 1], states[i], 0.5, temp1);
                 si->getStateSpace()->interpolate(states[i], states[i + 1], 0.5, temp2);
                 si->getStateSpace()->interpolate(temp1, temp2, 0.5, temp1);
-                if (si->checkMotion(states[i - 1], temp1) && si->checkMotion(temp1, states[i + 1]))
+                const auto cm1_t0 = std::chrono::steady_clock::now();
+                const bool cm1 = si->checkMotion(states[i - 1], temp1);
+                const double cm1_s = std::chrono::duration<double>(
+                                         std::chrono::steady_clock::now() -
+                                         cm1_t0)
+                                         .count();
+                ++check_motion_calls;
+                if (trace && cm1_s > 0.25)
+                    std::cerr << "[PathSimplifier] smoothBSpline slow checkMotion "
+                              << "call=" << check_motion_calls
+                              << " phase=left i=" << i
+                              << " dt_s=" << cm1_s << "\n";
+                const auto cm2_t0 = std::chrono::steady_clock::now();
+                const bool cm2 = cm1 && si->checkMotion(temp1, states[i + 1]);
+                const double cm2_s = std::chrono::duration<double>(
+                                         std::chrono::steady_clock::now() -
+                                         cm2_t0)
+                                         .count();
+                ++check_motion_calls;
+                if (trace && cm2_s > 0.25)
+                    std::cerr << "[PathSimplifier] smoothBSpline slow checkMotion "
+                              << "call=" << check_motion_calls
+                              << " phase=right i=" << i
+                              << " dt_s=" << cm2_s << "\n";
+                if (cm1 && cm2)
                 {
                     if (si->distance(states[i], temp1) > minChange)
                     {
@@ -114,7 +150,15 @@ void ompl::geometric::PathSimplifier::smoothBSpline(PathGeometric &path, unsigne
         }
 
         if (u == 0)
+        {
+            if (trace)
+                std::cerr << "[PathSimplifier] smoothBSpline step=" << (s + 1)
+                          << " converged (u==0), stopping\n";
             break;
+        }
+        if (trace)
+            std::cerr << "[PathSimplifier] smoothBSpline step=" << (s + 1)
+                      << " updates=" << u << "\n";
     }
 
     si->freeState(temp1);
@@ -324,6 +368,9 @@ bool ompl::geometric::PathSimplifier::partialShortcutPath(PathGeometric &path, u
     base::State *temp1 = si->allocState();
     bool result = false;
     unsigned int nochange = 0;
+    const char *trace_env = std::getenv("MR_PATH_SIMPLIFY_TRACE");
+    const bool trace = trace_env && trace_env[0] != '\0' && std::strcmp(trace_env, "0") != 0;
+    std::uint64_t check_motion_calls = 0;
     // Attempt shortcutting maxSteps times or when no improvement is found after
     // maxEmptySteps attempts, whichever comes first
     for (unsigned int i = 0; i < maxSteps && nochange < maxEmptySteps; ++i, ++nochange)
@@ -399,7 +446,19 @@ bool ompl::geometric::PathSimplifier::partialShortcutPath(PathGeometric &path, u
         }
 
         // Check for validity between s0 and s1
-        if (si->checkMotion(s0, s1))
+        const auto cm_t0 = std::chrono::steady_clock::now();
+        const bool shortcut_valid = si->checkMotion(s0, s1);
+        const double cm_s = std::chrono::duration<double>(
+                                std::chrono::steady_clock::now() - cm_t0)
+                                .count();
+        ++check_motion_calls;
+        if (trace && cm_s > 0.25)
+            std::cerr << "[PathSimplifier] partialShortcutPath slow checkMotion "
+                      << "call=" << check_motion_calls << " i=" << i
+                      << " pos0=" << pos0 << " pos1=" << pos1
+                      << " index0=" << index0 << " index1=" << index1
+                      << " dt_s=" << cm_s << "\n";
+        if (shortcut_valid)
         {
             if (pos0 > pos1)
             {
@@ -783,12 +842,26 @@ bool ompl::geometric::PathSimplifier::simplify(PathGeometric &path, double maxTi
 bool ompl::geometric::PathSimplifier::simplify(PathGeometric &path, const base::PlannerTerminationCondition &ptc,
                                                bool atLeastOnce)
 {
+    const char *trace_env = std::getenv("MR_PATH_SIMPLIFY_TRACE");
+    const bool trace = trace_env && trace_env[0] != '\0' && std::strcmp(trace_env, "0") != 0;
+    auto now_seconds = []() {
+        using Clock = std::chrono::steady_clock;
+        static const auto t0 = Clock::now();
+        return std::chrono::duration<double>(Clock::now() - t0).count();
+    };
+
     if (path.getStateCount() < 3)
         return true;
 
     bool tryMore = true, valid = true;
+    unsigned int outer_iter = 0;
     while ((ptc == false || atLeastOnce) && tryMore)
     {
+        ++outer_iter;
+        if (trace)
+            std::cerr << "[PathSimplifier] iter=" << outer_iter
+                      << " states=" << path.getStateCount()
+                      << " t=" << now_seconds() << " begin\n";
         // if the space is metric, we can do some additional smoothing
         if ((ptc == false || atLeastOnce) && si_->getStateSpace()->isMetricSpace())
         {
@@ -796,21 +869,73 @@ bool ompl::geometric::PathSimplifier::simplify(PathGeometric &path, const base::
             unsigned int times = 0;
             do
             {
+                if (trace)
+                {
+                    const auto &states = path.getStates();
+                    std::size_t zero_segments = 0;
+                    double min_segment = std::numeric_limits<double>::infinity();
+                    for (std::size_t si = 1; si < states.size(); ++si)
+                    {
+                        const double seg_len = si_->distance(states[si - 1], states[si]);
+                        if (seg_len <= std::numeric_limits<double>::epsilon())
+                            ++zero_segments;
+                        min_segment = std::min(min_segment, seg_len);
+                    }
+                    std::cerr << "[PathSimplifier] iter=" << outer_iter
+                              << " metric pass=" << (times + 1)
+                              << " segment_probe zero_segments=" << zero_segments
+                              << " min_segment=" << min_segment << "\n";
+                }
+                if (trace)
+                    std::cerr << "[PathSimplifier] iter=" << outer_iter
+                              << " metric pass=" << (times + 1)
+                              << " states=" << path.getStateCount()
+                              << " t=" << now_seconds()
+                              << " before partialShortcutPath\n";
                 bool shortcut = partialShortcutPath(path);  // split path segments, not just vertices
                 bool better_goal =
                     gsr_ ? findBetterGoal(path, ptc) : false;  // Try to connect the path to a closer goal
 
                 metricTryMore = shortcut || better_goal;
+                if (trace)
+                    std::cerr << "[PathSimplifier] iter=" << outer_iter
+                              << " metric pass=" << (times + 1)
+                              << " shortcut=" << (shortcut ? "true" : "false")
+                              << " better_goal=" << (better_goal ? "true" : "false")
+                              << " states=" << path.getStateCount()
+                              << " t=" << now_seconds() << " after partialShortcutPath\n";
             } while ((ptc == false || atLeastOnce) && ++times <= 5 && metricTryMore);
 
             // smooth the path with BSpline interpolation
             if (ptc == false || atLeastOnce)
+            {
+                if (trace)
+                    std::cerr << "[PathSimplifier] iter=" << outer_iter
+                              << " states=" << path.getStateCount()
+                              << " t=" << now_seconds() << " before smoothBSpline\n";
                 smoothBSpline(path, 3, path.length() / 100.0);
+                if (trace)
+                    std::cerr << "[PathSimplifier] iter=" << outer_iter
+                              << " states=" << path.getStateCount()
+                              << " t=" << now_seconds() << " after smoothBSpline\n";
+            }
 
             if (ptc == false || atLeastOnce)
             {
                 // we always run this if the metric-space algorithms were run.  In non-metric spaces this does not work.
+                if (trace)
+                    std::cerr << "[PathSimplifier] iter=" << outer_iter
+                              << " states=" << path.getStateCount()
+                              << " t=" << now_seconds() << " before checkAndRepair(A)\n";
                 const std::pair<bool, bool> &p = path.checkAndRepair(magic::MAX_VALID_SAMPLE_ATTEMPTS);
+                if (trace)
+                    std::cerr << "[PathSimplifier] iter=" << outer_iter
+                              << " states=" << path.getStateCount()
+                              << " t=" << now_seconds()
+                              << " after checkAndRepair(A) original_valid="
+                              << (p.first ? "true" : "false")
+                              << " repaired_valid=" << (p.second ? "true" : "false")
+                              << "\n";
                 if (!p.second)
                 {
                     valid = false;
@@ -825,21 +950,69 @@ bool ompl::geometric::PathSimplifier::simplify(PathGeometric &path, const base::
 
         // try a randomized step of connecting vertices
         if (ptc == false || atLeastOnce)
+        {
+            if (trace)
+                std::cerr << "[PathSimplifier] iter=" << outer_iter
+                          << " states=" << path.getStateCount()
+                          << " t=" << now_seconds() << " before reduceVertices(1)\n";
             tryMore = reduceVertices(path);
+            if (trace)
+                std::cerr << "[PathSimplifier] iter=" << outer_iter
+                          << " states=" << path.getStateCount()
+                          << " t=" << now_seconds()
+                          << " after reduceVertices(1) tryMore="
+                          << (tryMore ? "true" : "false") << "\n";
+        }
 
         // try to collapse close-by vertices
         if (ptc == false || atLeastOnce)
+        {
+            if (trace)
+                std::cerr << "[PathSimplifier] iter=" << outer_iter
+                          << " states=" << path.getStateCount()
+                          << " t=" << now_seconds() << " before collapseCloseVertices\n";
             collapseCloseVertices(path);
+            if (trace)
+                std::cerr << "[PathSimplifier] iter=" << outer_iter
+                          << " states=" << path.getStateCount()
+                          << " t=" << now_seconds() << " after collapseCloseVertices\n";
+        }
 
         // try to reduce verices some more, if there is any point in doing so
         unsigned int times = 0;
         while ((ptc == false || atLeastOnce) && tryMore && ++times <= 5)
+        {
+            if (trace)
+                std::cerr << "[PathSimplifier] iter=" << outer_iter
+                          << " reduce loop pass=" << times
+                          << " states=" << path.getStateCount()
+                          << " t=" << now_seconds() << " before reduceVertices(loop)\n";
             tryMore = reduceVertices(path);
+            if (trace)
+                std::cerr << "[PathSimplifier] iter=" << outer_iter
+                          << " reduce loop pass=" << times
+                          << " states=" << path.getStateCount()
+                          << " t=" << now_seconds()
+                          << " after reduceVertices(loop) tryMore="
+                          << (tryMore ? "true" : "false") << "\n";
+        }
 
         if ((ptc == false || atLeastOnce) && si_->getStateSpace()->isMetricSpace())
         {
             // we always run this if the metric-space algorithms were run.  In non-metric spaces this does not work.
+            if (trace)
+                std::cerr << "[PathSimplifier] iter=" << outer_iter
+                          << " states=" << path.getStateCount()
+                          << " t=" << now_seconds() << " before checkAndRepair(B)\n";
             const std::pair<bool, bool> &p = path.checkAndRepair(magic::MAX_VALID_SAMPLE_ATTEMPTS);
+            if (trace)
+                std::cerr << "[PathSimplifier] iter=" << outer_iter
+                          << " states=" << path.getStateCount()
+                          << " t=" << now_seconds()
+                          << " after checkAndRepair(B) original_valid="
+                          << (p.first ? "true" : "false")
+                          << " repaired_valid=" << (p.second ? "true" : "false")
+                          << "\n";
             if (!p.second)
             {
                 valid = false;
@@ -852,6 +1025,10 @@ bool ompl::geometric::PathSimplifier::simplify(PathGeometric &path, const base::
         }
 
         atLeastOnce = false;
+        if (trace)
+            std::cerr << "[PathSimplifier] iter=" << outer_iter
+                      << " states=" << path.getStateCount()
+                      << " t=" << now_seconds() << " end\n";
     }
     return valid || path.check();
 }
