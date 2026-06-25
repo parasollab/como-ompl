@@ -1,7 +1,7 @@
 [submodule "external/vamp"]
 	path = external/vamp
-	url = https://github.com/KavrakiLab/vamp
-	branch = main
+	url = git@github.com:parasollab/como-vamp.git
+	branch = ao-arc-port
 	update = checkout
 [submodule "external/nanobind"]
 	path = external/nanobind

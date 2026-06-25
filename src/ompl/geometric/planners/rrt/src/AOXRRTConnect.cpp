@@ -185,6 +185,8 @@ ompl::geometric::AOXRRTConnect::Motion *ompl::geometric::AOXRRTConnect::findNeig
     while (nearest_motion->cost > 0 && sampled_motion->cost < nearest_motion->cost + nearest_distance)
     {
         idx++;
+        if (static_cast<std::size_t>(idx) >= nearest_vec.size())
+            return nullptr;
         nearest_motion = nearest_vec[idx];
         nearest_distance = si_->distance(sampled_motion->state, nearest_motion->state);
     }
@@ -195,6 +197,9 @@ ompl::geometric::AOXRRTConnect::Motion *ompl::geometric::AOXRRTConnect::findNeig
 ompl::geometric::AOXRRTConnect::GrowState ompl::geometric::AOXRRTConnect::growTree(TreeData &tree, TreeGrowingInfo &tgi,
                                                                                    Motion *rmotion)
 {
+    if (_ptc)
+        return TRAPPED;
+
     auto g_hat = tgi.start ? si_->distance(rmotion->state, startState) : si_->distance(rmotion->state, goalState);
 
     auto *root_motion = new Motion(si_);
@@ -254,7 +259,7 @@ ompl::geometric::AOXRRTConnect::GrowState ompl::geometric::AOXRRTConnect::growTr
         g_hat = tgi.start ? si_->distance(dstate, startState) : si_->distance(dstate, goalState);
 
         int remaining_resample_attempts = maxResampleAttempts_;
-        while (validMotion && remaining_resample_attempts > 0)
+        while (!_ptc && validMotion && remaining_resample_attempts > 0)
         {
             remaining_resample_attempts--;
 
@@ -266,6 +271,11 @@ ompl::geometric::AOXRRTConnect::GrowState ompl::geometric::AOXRRTConnect::growTr
 
             auto rootDist = tree->getDistanceFunction()(rmotion, root_motion);
             Motion *n_nmotion = findNeighbour(rmotion, rootDist, tree);
+            if (n_nmotion == nullptr)
+            {
+                validMotion = false;
+                break;
+            }
 
             if (new_cost <= si_->distance(n_nmotion->state, dstate) + n_nmotion->cost || c_range == 0)
             {
@@ -420,7 +430,7 @@ ompl::base::PlannerStatus ompl::geometric::AOXRRTConnect::solve(const base::Plan
             }
 
             /* Keep trying to connect until we reach the other tree or fail to advance */
-            while (gsc == ADVANCED)
+            while (!ptc && !internalResetCondition() && gsc == ADVANCED)
             {
                 gsc = growTree(otherTree, tgi, cmotion);
             }
