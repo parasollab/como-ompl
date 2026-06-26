@@ -45,7 +45,7 @@ if(DOXYGEN_FOUND AND NOT CMAKE_VERSION VERSION_LESS 3.9)
 endif()
 
 # man files should not be installed inside python module
-if(NOT SKBUILD)
+if(OMPL_INSTALL_BENCHMARK_TOOLS AND NOT SKBUILD)
     install(FILES man/ompl_benchmark_statistics.1
         DESTINATION ${CMAKE_INSTALL_MANDIR}/man1 COMPONENT ompl)
 endif()

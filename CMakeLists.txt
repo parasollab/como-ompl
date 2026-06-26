@@ -22,6 +22,8 @@ add_feature_info(VAMP_PORTABLE_BUILD "${VAMP_PORTABLE_BUILD}" "Whether to build 
 
 option(OMPL_BUILD_PYTHON_BINDINGS "Build OMPL Python bindings" ON)
 add_feature_info(OMPL_BUILD_PYTHON_BINDINGS "${OMPL_BUILD_PYTHON_BINDINGS}" "Whether to build OMPL Python bindings.")
+option(OMPL_INSTALL_BENCHMARK_TOOLS "Install OMPL benchmark helper script and man page" ON)
+add_feature_info(OMPL_INSTALL_BENCHMARK_TOOLS "${OMPL_INSTALL_BENCHMARK_TOOLS}" "Whether to install OMPL benchmark helper tools.")
 
 # default to building shared libs except Windows
 if (MSVC)
