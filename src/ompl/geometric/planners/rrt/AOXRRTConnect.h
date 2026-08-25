@@ -113,6 +113,13 @@ namespace ompl
                 return maxDistance_;
             }
 
+            /** \brief Set the planner's private RNG stream without changing
+             * OMPL's process-global seed. */
+            void setLocalSeed(std::uint_fast32_t seed)
+            {
+                rng_.setLocalSeed(seed);
+            }
+
             /** \brief Set a different nearest neighbors datastructure */
             template <template <typename T> class NN>
             void setNearestNeighbors()

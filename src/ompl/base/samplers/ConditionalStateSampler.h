@@ -83,6 +83,12 @@ namespace ompl
             bool sample(State *state) override;
             bool sampleNear(State *state, const State *near, double distance) override;
 
+            /** \brief Set the time-conditioning RNG stream. */
+            void setLocalSeed(std::uint_fast32_t seed)
+            {
+                rng_.setLocalSeed(seed);
+            }
+
         private:
             /** \brief The internal state sampler, that samples the space (but not time). */
             StateSamplerPtr internalSampler_ = si_->allocStateSampler();
