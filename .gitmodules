@@ -1,7 +1,7 @@
 [submodule "external/vamp"]
 	path = external/vamp
-	url = git@github.com:parasollab/como-vamp.git
-	branch = mr-ompl-minimal
+	url = https://github.com/parasollab/como-vamp.git
+	branch = viewer-repair
 	update = checkout
 [submodule "external/nanobind"]
 	path = external/nanobind
