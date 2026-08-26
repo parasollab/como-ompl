@@ -9,7 +9,7 @@ set_package_properties(Boost PROPERTIES
     URL "https://www.boost.org"
     PURPOSE "Used throughout OMPL for data serialization, graphs, etc.")
 set(Boost_USE_MULTITHREADED ON)
-find_package(Boost 1.68 REQUIRED COMPONENTS serialization program_options)
+find_package(Boost 1.68 CONFIG REQUIRED COMPONENTS serialization program_options)
 
 # Threads
 set_package_properties(Threads PROPERTIES

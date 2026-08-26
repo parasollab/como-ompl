@@ -290,6 +290,13 @@ namespace ompl
              * simplification */
             bool freeStates() const;
 
+            /** \brief Set the simplifier's private RNG stream without
+             * changing OMPL's process-global seed. */
+            void setLocalSeed(std::uint_fast32_t seed)
+            {
+                rng_.setLocalSeed(seed);
+            }
+
         protected:
             int selectAlongPath(std::vector<double> dists, std::vector<base::State *> states, double distTo,
                                 double threshold, base::State *select_state, int &pos);

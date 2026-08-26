@@ -108,6 +108,18 @@ namespace ompl
              * subset of a given state. */
             Cost heuristicSolnCost(const State *statePtr) const override;
 
+            /** \brief Set every private RNG stream used by this sampler. */
+            void setLocalSeeds(std::uint_fast32_t seed,
+                               std::uint_fast32_t baseSamplerSeed,
+                               std::uint_fast32_t uninformedSamplerSeed)
+            {
+                rng_.setLocalSeed(seed);
+                if (baseSampler_)
+                    baseSampler_->setLocalSeed(baseSamplerSeed);
+                if (uninformedSubSampler_)
+                    uninformedSubSampler_->setLocalSeed(uninformedSamplerSeed);
+            }
+
         private:
             /** \brief A constant pointer to ProlateHyperspheroid */
             using ProlateHyperspheroidCPtr = std::shared_ptr<const ompl::ProlateHyperspheroid>;

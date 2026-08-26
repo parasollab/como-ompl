@@ -49,6 +49,10 @@ ompl::geometric::STRRTstar::STRRTstar(const ompl::base::SpaceInformationPtr &si)
     specs_.optimizingPaths = true;
     specs_.canReportIntermediateSolutions = true;
     Planner::declareParam<double>("range", this, &STRRTstar::setRange, &STRRTstar::getRange, "0.:1.:10000.");
+    Planner::declareParam<double>("minimum_goal_time", this, &STRRTstar::setMinimumGoalTime,
+                                  &STRRTstar::getMinimumGoalTime, "0.:0.1:10000.");
+    Planner::declareParam<bool>("return_first_solution", this, &STRRTstar::setReturnFirstSolution,
+                                &STRRTstar::getReturnFirstSolution, "0,1");
     distanceBetweenTrees_ = std::numeric_limits<double>::infinity();
 }
 
@@ -128,6 +132,9 @@ ompl::base::PlannerStatus ompl::geometric::STRRTstar::solve(const ompl::base::Pl
         OMPL_ERROR("%s: Unknown type of goal", getName().c_str());
         return ompl::base::PlannerStatus::UNRECOGNIZED_GOAL_TYPE;
     }
+
+    if (isTimeBounded_ && minimumGoalTime_ > upperTimeBound_)
+        return ompl::base::PlannerStatus::INVALID_GOAL;
 
     while (const ompl::base::State *st = pis_.nextStart())
     {
@@ -382,8 +389,13 @@ ompl::base::PlannerStatus ompl::geometric::STRRTstar::solve(const ompl::base::Pl
             {
                 constructSolution(startMotion, goalMotion, intermediateSolutionCallback, ptc);
                 solved = true;
+                if (returnFirstSolution_)
+                {
+                    ptc.terminate();
+                    break;
+                }
                 if (ptc || upperTimeBound_ == minimumTime_)
-                    break;  // first solution is enough or optimal solution is found
+                    break;  // time limit or optimal solution is found
                 // continue to look for solutions with the narrower time bound until the termination condition is met
             }
             else
@@ -639,7 +651,7 @@ void ompl::geometric::STRRTstar::constructSolution(
     // Update Time Limit
     upperTimeBound_ = (bestTime_ - minimumTime_) * optimumApproxFactor_ + minimumTime_;
 
-    if (ptc)
+    if (ptc || returnFirstSolution_)
         return;
     // Prune Start and Goal Trees
     pruneStartTree();
@@ -1080,7 +1092,7 @@ bool ompl::geometric::STRRTstar::sampleGoalTime(ompl::base::State *goal, double 
     double startTime = si_->getStateSpace()->as<ompl::base::SpaceTimeStateSpace>()->getStateTime(startMotion_->state);
     double minTimeToGoal =
         si_->getStateSpace()->as<ompl::base::SpaceTimeStateSpace>()->timeToCoverDistance(startMotion_->state, goal);
-    double minTime = startTime + minTimeToGoal;
+    double minTime = std::max(startTime + minTimeToGoal, minimumGoalTime_);
 
     if (isTimeBounded_)
     {
@@ -1175,6 +1187,11 @@ void ompl::geometric::STRRTstar::setOptimumApproxFactor(double optimumApproxFact
     optimumApproxFactor_ = optimumApproxFactor;
 }
 
+void ompl::geometric::STRRTstar::setReturnFirstSolution(bool v)
+{
+    returnFirstSolution_ = v;
+}
+
 std::string ompl::geometric::STRRTstar::getRewiringState() const
 {
     std::vector<std::string> s{"Radius", "KNearest", "Off"};
@@ -1245,4 +1262,18 @@ void ompl::geometric::STRRTstar::setInitialTimeBoundFactor(double f)
 void ompl::geometric::STRRTstar::setSampleUniformForUnboundedTime(bool uniform)
 {
     sampleUniformForUnboundedTime_ = uniform;
+}
+
+void ompl::geometric::STRRTstar::setMinimumGoalTime(double t)
+{
+    if (t < 0.0)
+    {
+        OMPL_ERROR("%s: Minimum goal time needs to be non-negative.", getName().c_str());
+    }
+    minimumGoalTime_ = std::max(0.0, t);
+}
+
+double ompl::geometric::STRRTstar::getMinimumGoalTime() const
+{
+    return minimumGoalTime_;
 }

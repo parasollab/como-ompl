@@ -17,6 +17,19 @@ The Open Motion Planning Library (OMPL)
 [![Paper](https://img.shields.io/badge/IJRR-Constrained_Planning-blue)](https://dx.doi.org/10.1177/0278364919868530)
 [![Paper](https://img.shields.io/badge/ICRA-VAMP-blue)](https://dx.doi.org/10.1109/ICRA57147.2024.10611190)
 
+CoMotion Fork Notice
+--------------------
+
+This repository is the CoMotion fork of OMPL used by CoMotion. It preserves
+OMPL's BSD 3-Clause License; see `LICENSE`.
+
+When built with VAMP support, this fork uses the bundled CoMotion VAMP
+submodule at `external/vamp`. CoMotion VAMP is distributed under the Apache
+License 2.0; see `external/vamp/LICENSE.txt`,
+`external/vamp/COMOTION_CHANGES.md`, and the third-party notices under
+`external/vamp/licenses/`. Redistributions of this fork should preserve both
+the OMPL and VAMP license and notice files.
+
 Installation
 ------------
 
