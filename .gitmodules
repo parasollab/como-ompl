@@ -1,7 +1,7 @@
 [submodule "external/vamp"]
 	path = external/vamp
 	url = https://github.com/parasollab/como-vamp.git
-	branch = viewer-repair
+	branch = main
 	update = checkout
 [submodule "external/nanobind"]
 	path = external/nanobind
