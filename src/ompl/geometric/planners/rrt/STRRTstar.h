@@ -128,11 +128,18 @@ namespace ompl
             void setMinimumGoalTime(double t);
             double getMinimumGoalTime() const;
 
+            /** \brief Maximum goal time that sampled goal states may use. A value of 0 keeps the state-space bound. */
+            void setMaximumGoalTime(double t);
+            double getMaximumGoalTime() const;
+
             /** \brief When true, return immediately upon finding the first solution instead of
              * continuing to optimize until the time limit. Also skips the post-solution tree
              * pruning and goal-tree reconnection pass (so the first feasible path is kept as-is). */
             void setReturnFirstSolution(bool v);
             bool getReturnFirstSolution() const { return returnFirstSolution_; }
+
+            /** \brief Restrict planner-owned random samples to these space-component bounds. */
+            void setLocalSpaceBounds(const std::vector<std::pair<double, double>> &bounds);
 
             void setup() override;
 
@@ -237,6 +244,9 @@ namespace ompl
             /** \brief Lower bound for sampled goal times. */
             double minimumGoalTime_ = 0.0;
 
+            /** \brief Optional upper bound for sampled goal times. A value of 0 means use the state-space upper bound. */
+            double maximumGoalTime_ = 0.0;
+
             /** \brief The factor to which found solution times need to be reduced compared to minimum time, (0, 1]. */
             double optimumApproxFactor_ = 1.0;
 
@@ -268,6 +278,9 @@ namespace ompl
             /** \brief Samples a goal until successful or the termination condition is fulfilled. */
             base::State *nextGoal(const base::PlannerTerminationCondition &ptc, int n, double oldBatchTimeBoundFactor,
                                   double newBatchTimeBoundFactor);
+
+            /** \brief Samples a valid state using optional local space-component bounds. */
+            bool sampleState(base::State *state);
 
             /** \brief Samples the time component of a goal state dependant on its space component. Returns false, if
              * goal can't be reached in time. */
@@ -332,6 +345,9 @@ namespace ompl
             /** \brief Whether the samples are uniformly distributed over the whole space or are centered at lower
              * times. */
             bool sampleUniformForUnboundedTime_ = true;
+
+            /** \brief Optional local bounds for random samples in the space component. */
+            std::vector<std::pair<double, double>> localSpaceBounds_{};
 
             /** \brief When true, return immediately upon finding the first solution. */
             bool returnFirstSolution_ = false;

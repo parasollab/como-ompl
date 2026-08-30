@@ -36,6 +36,7 @@
 #include "ompl/geometric/planners/PlannerIncludes.h"
 
 #include <functional>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <vector>
@@ -80,9 +81,10 @@ namespace ompl
             {
                 bool success{false};
                 PathGeometricPtr path;
+                double resumeConflictCheckTime{0.0};
             };
 
-            using ConflictCheckerFn = std::function<std::optional<Conflict>(const PathGeometric &)>;
+            using ConflictCheckerFn = std::function<std::optional<Conflict>(const PathGeometric &, double)>;
             using LocalRepairFn =
                 std::function<RepairResult(const RepairRequest &, const base::PlannerTerminationCondition &)>;
             using InitialPlannerAllocator = std::function<base::PlannerPtr(const base::SpaceInformationPtr &)>;
@@ -122,6 +124,9 @@ namespace ompl
             void setExpansionStep(double step);
             double getExpansionStep() const;
 
+            void setRepairHorizon(double horizon);
+            double getRepairHorizon() const;
+
             void setCascadeDynamicObstacles(bool cascade);
             bool getCascadeDynamicObstacles() const;
 
@@ -131,6 +136,13 @@ namespace ompl
             unsigned int getNumConflicts() const;
             unsigned int getNumRepairAttempts() const;
             unsigned int getNumTemporalExpansions() const;
+            std::uint64_t getAstTotalTimeNs() const;
+            std::uint64_t getAstInitialPathTimeNs() const;
+            std::uint64_t getAstTimeParameterizationTimeNs() const;
+            std::uint64_t getAstConflictCallbackTimeNs() const;
+            std::uint64_t getAstRepairCallbackTimeNs() const;
+            std::uint64_t getAstSolutionCommitTimeNs() const;
+            std::uint64_t getAstOtherTimeNs() const;
             const PathGeometricPtr &getLastSolutionPath() const;
 
         private:
@@ -149,12 +161,19 @@ namespace ompl
             unsigned int localBudget_{1024};
             double initialWindowSize_{1.0};
             double expansionStep_{1.0};
+            double repairHorizon_{0.0};
             bool cascadeDynamicObstacles_{true};
             unsigned int dynamicObstacleCount_{0};
 
             unsigned int numConflicts_{0};
             unsigned int numRepairAttempts_{0};
             unsigned int numTemporalExpansions_{0};
+            std::uint64_t astTotalTimeNs_{0};
+            std::uint64_t astInitialPathTimeNs_{0};
+            std::uint64_t astTimeParameterizationTimeNs_{0};
+            std::uint64_t astConflictCallbackTimeNs_{0};
+            std::uint64_t astRepairCallbackTimeNs_{0};
+            std::uint64_t astSolutionCommitTimeNs_{0};
             PathGeometricPtr lastSolutionPath_;
         };
     }  // namespace geometric

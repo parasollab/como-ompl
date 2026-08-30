@@ -7,6 +7,7 @@
 #include "ompl/util/Exception.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -35,6 +36,8 @@ ompl::geometric::ASTRRT::ASTRRT(const ob::SpaceInformationPtr &si)
                                   &ASTRRT::getInitialWindowSize, "0.:0.1:100000.");
     Planner::declareParam<double>("expansion_step", this, &ASTRRT::setExpansionStep, &ASTRRT::getExpansionStep,
                                   "0.:0.1:100000.");
+    Planner::declareParam<double>("repair_horizon", this, &ASTRRT::setRepairHorizon, &ASTRRT::getRepairHorizon,
+                                  "0.:0.1:100000.");
     Planner::declareParam<bool>("cascade_dynamic_obstacles", this, &ASTRRT::setCascadeDynamicObstacles,
                                 &ASTRRT::getCascadeDynamicObstacles, "0,1");
 }
@@ -45,6 +48,12 @@ void ompl::geometric::ASTRRT::clear()
     numConflicts_ = 0;
     numRepairAttempts_ = 0;
     numTemporalExpansions_ = 0;
+    astTotalTimeNs_ = 0;
+    astInitialPathTimeNs_ = 0;
+    astTimeParameterizationTimeNs_ = 0;
+    astConflictCallbackTimeNs_ = 0;
+    astRepairCallbackTimeNs_ = 0;
+    astSolutionCommitTimeNs_ = 0;
     lastSolutionPath_.reset();
 }
 
@@ -73,39 +82,81 @@ void ompl::geometric::ASTRRT::setup()
 
 ompl::base::PlannerStatus ompl::geometric::ASTRRT::solve(const ob::PlannerTerminationCondition &ptc)
 {
+    const auto astSolveStart = std::chrono::steady_clock::now();
+    auto finish = [this, astSolveStart](const ob::PlannerStatus &status) {
+        astTotalTimeNs_ =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - astSolveStart)
+                .count();
+        return status;
+    };
+
     checkValidity();
     numConflicts_ = 0;
     numRepairAttempts_ = 0;
     numTemporalExpansions_ = 0;
+    astTotalTimeNs_ = 0;
+    astInitialPathTimeNs_ = 0;
+    astTimeParameterizationTimeNs_ = 0;
+    astConflictCallbackTimeNs_ = 0;
+    astRepairCallbackTimeNs_ = 0;
+    astSolutionCommitTimeNs_ = 0;
     lastSolutionPath_.reset();
 
+    auto sectionStart = std::chrono::steady_clock::now();
     auto geometricPath = planInitialGeometricPath(ptc);
+    astInitialPathTimeNs_ +=
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - sectionStart)
+            .count();
     if (!geometricPath)
-        return ptc ? ob::PlannerStatus::TIMEOUT : ob::PlannerStatus::UNKNOWN;
+        return finish(ptc ? ob::PlannerStatus::TIMEOUT : ob::PlannerStatus::UNKNOWN);
 
+    sectionStart = std::chrono::steady_clock::now();
     auto timedPath = timeParameterizePath(*geometricPath);
+    astTimeParameterizationTimeNs_ +=
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - sectionStart)
+            .count();
     if (!timedPath)
-        return ptc ? ob::PlannerStatus::TIMEOUT : ob::PlannerStatus::UNKNOWN;
+        return finish(ptc ? ob::PlannerStatus::TIMEOUT : ob::PlannerStatus::UNKNOWN);
 
     if (!conflictChecker_ || !localRepair_)
     {
         lastSolutionPath_ = timedPath;
+        sectionStart = std::chrono::steady_clock::now();
         pdef_->addSolutionPath(lastSolutionPath_, false, 0.0, getName());
-        return ob::PlannerStatus::EXACT_SOLUTION;
+        astSolutionCommitTimeNs_ +=
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - sectionStart)
+                .count();
+        return finish(ob::PlannerStatus::EXACT_SOLUTION);
     }
 
+    double nextConflictCheckTime = 0.0;
     while (!ptc)
     {
-        auto conflict = conflictChecker_(*timedPath);
+        sectionStart = std::chrono::steady_clock::now();
+        auto conflict = conflictChecker_(*timedPath, nextConflictCheckTime);
+        astConflictCallbackTimeNs_ +=
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - sectionStart)
+                .count();
         if (!conflict)
         {
             lastSolutionPath_ = timedPath;
+            sectionStart = std::chrono::steady_clock::now();
             pdef_->addSolutionPath(lastSolutionPath_, false, 0.0, getName());
-            return ob::PlannerStatus::EXACT_SOLUTION;
+            astSolutionCommitTimeNs_ +=
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - sectionStart)
+                    .count();
+            return finish(ob::PlannerStatus::EXACT_SOLUTION);
         }
 
         ++numConflicts_;
-        const double horizon = pathEndTime(*timedPath);
+        const double pathHorizon = pathEndTime(*timedPath);
+        const double horizon = repairHorizon_ > 0.0 ? std::max(pathHorizon, repairHorizon_) : pathHorizon;
         double windowStart = std::max(0.0, conflict->time - initialWindowSize_);
         double windowEnd = std::min(std::max(windowStart, conflict->time + initialWindowSize_), horizon);
         if (windowEnd <= windowStart)
@@ -133,31 +184,37 @@ ompl::base::PlannerStatus ompl::geometric::ASTRRT::solve(const ob::PlannerTermin
             }
 
             ++numRepairAttempts_;
+            sectionStart = std::chrono::steady_clock::now();
             RepairResult result = localRepair_(request, ptc);
+            astRepairCallbackTimeNs_ +=
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - sectionStart)
+                    .count();
             if (result.success && result.path)
             {
                 timedPath = result.path;
+                nextConflictCheckTime = std::max(0.0, result.resumeConflictCheckTime - 1e-6);
                 repaired = true;
                 break;
             }
 
             if (windowStart <= 0.0 && windowEnd >= horizon)
-                return ob::PlannerStatus::TIMEOUT;
+                return finish(ob::PlannerStatus::TIMEOUT);
 
             const double previousStart = windowStart;
             const double previousEnd = windowEnd;
             windowStart = std::max(0.0, windowStart - expansionStep_);
             windowEnd = std::min(horizon, windowEnd + expansionStep_);
             if (windowStart == previousStart && windowEnd == previousEnd)
-                return ob::PlannerStatus::TIMEOUT;
+                return finish(ob::PlannerStatus::TIMEOUT);
             ++numTemporalExpansions_;
         }
 
         if (!repaired)
-            return ob::PlannerStatus::TIMEOUT;
+            return finish(ob::PlannerStatus::TIMEOUT);
     }
 
-    return ob::PlannerStatus::TIMEOUT;
+    return finish(ob::PlannerStatus::TIMEOUT);
 }
 
 void ompl::geometric::ASTRRT::getPlannerData(ob::PlannerData &data) const
@@ -241,6 +298,16 @@ double ompl::geometric::ASTRRT::getExpansionStep() const
     return expansionStep_;
 }
 
+void ompl::geometric::ASTRRT::setRepairHorizon(double horizon)
+{
+    repairHorizon_ = std::max(0.0, horizon);
+}
+
+double ompl::geometric::ASTRRT::getRepairHorizon() const
+{
+    return repairHorizon_;
+}
+
 void ompl::geometric::ASTRRT::setCascadeDynamicObstacles(bool cascade)
 {
     cascadeDynamicObstacles_ = cascade;
@@ -274,6 +341,47 @@ unsigned int ompl::geometric::ASTRRT::getNumRepairAttempts() const
 unsigned int ompl::geometric::ASTRRT::getNumTemporalExpansions() const
 {
     return numTemporalExpansions_;
+}
+
+std::uint64_t ompl::geometric::ASTRRT::getAstTotalTimeNs() const
+{
+    return astTotalTimeNs_;
+}
+
+std::uint64_t ompl::geometric::ASTRRT::getAstInitialPathTimeNs() const
+{
+    return astInitialPathTimeNs_;
+}
+
+std::uint64_t ompl::geometric::ASTRRT::getAstTimeParameterizationTimeNs() const
+{
+    return astTimeParameterizationTimeNs_;
+}
+
+std::uint64_t ompl::geometric::ASTRRT::getAstConflictCallbackTimeNs() const
+{
+    return astConflictCallbackTimeNs_;
+}
+
+std::uint64_t ompl::geometric::ASTRRT::getAstRepairCallbackTimeNs() const
+{
+    return astRepairCallbackTimeNs_;
+}
+
+std::uint64_t ompl::geometric::ASTRRT::getAstSolutionCommitTimeNs() const
+{
+    return astSolutionCommitTimeNs_;
+}
+
+std::uint64_t ompl::geometric::ASTRRT::getAstOtherTimeNs() const
+{
+    const std::uint64_t accounted =
+        astInitialPathTimeNs_ +
+        astTimeParameterizationTimeNs_ +
+        astConflictCallbackTimeNs_ +
+        astRepairCallbackTimeNs_ +
+        astSolutionCommitTimeNs_;
+    return astTotalTimeNs_ > accounted ? astTotalTimeNs_ - accounted : 0;
 }
 
 const ompl::geometric::PathGeometricPtr &ompl::geometric::ASTRRT::getLastSolutionPath() const
@@ -354,6 +462,7 @@ ompl::geometric::ASTRRT::timeParameterizePath(const PathGeometric &geometricPath
         path->append(state);
     }
     si_->freeState(state);
+
     return path;
 }
 

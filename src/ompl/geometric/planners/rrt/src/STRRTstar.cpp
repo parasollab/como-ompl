@@ -37,6 +37,7 @@
 #include "ompl/geometric/planners/rrt/STRRTstar.h"
 #include <ompl/util/Exception.h>
 #include <ompl/base/ScopedState.h>
+#include <ompl/base/spaces/RealVectorStateSpace.h>
 
 ompl::geometric::STRRTstar::STRRTstar(const ompl::base::SpaceInformationPtr &si)
   : Planner(si, "SpaceTimeRRT"), sampler_(&(*si), startMotion_, goalMotions_, newBatchGoalMotions_, sampleOldBatch_)
@@ -51,6 +52,8 @@ ompl::geometric::STRRTstar::STRRTstar(const ompl::base::SpaceInformationPtr &si)
     Planner::declareParam<double>("range", this, &STRRTstar::setRange, &STRRTstar::getRange, "0.:1.:10000.");
     Planner::declareParam<double>("minimum_goal_time", this, &STRRTstar::setMinimumGoalTime,
                                   &STRRTstar::getMinimumGoalTime, "0.:0.1:10000.");
+    Planner::declareParam<double>("maximum_goal_time", this, &STRRTstar::setMaximumGoalTime,
+                                  &STRRTstar::getMaximumGoalTime, "0.:0.1:10000.");
     Planner::declareParam<bool>("return_first_solution", this, &STRRTstar::setReturnFirstSolution,
                                 &STRRTstar::getReturnFirstSolution, "0,1");
     distanceBetweenTrees_ = std::numeric_limits<double>::infinity();
@@ -85,11 +88,93 @@ void ompl::geometric::STRRTstar::setup()
         upperTimeBound_ = std::numeric_limits<double>::infinity();
         isTimeBounded_ = false;
     }
+    if (maximumGoalTime_ > 0.0)
+    {
+        upperTimeBound_ = std::min(upperTimeBound_, maximumGoalTime_);
+        isTimeBounded_ = true;
+    }
     initialTimeBound_ = upperTimeBound_;
 
     si_->getStateSpace()->as<ompl::base::SpaceTimeStateSpace>()->updateEpsilon();
     // Calculate some constants:
     calculateRewiringLowerBounds();
+}
+
+void ompl::geometric::STRRTstar::setLocalSpaceBounds(const std::vector<std::pair<double, double>> &bounds)
+{
+    localSpaceBounds_ = bounds;
+}
+
+bool ompl::geometric::STRRTstar::sampleState(ompl::base::State *state)
+{
+    if (localSpaceBounds_.empty())
+    {
+        return sampler_.sample(state);
+    }
+
+    auto *spaceState = state->as<ompl::base::CompoundState>()->as<ompl::base::RealVectorStateSpace::StateType>(0);
+    for (int i = 0; i < 10; ++i)
+    {
+        for (std::size_t dim = 0; dim < localSpaceBounds_.size(); ++dim)
+        {
+            spaceState->values[dim] = rng_.uniformReal(localSpaceBounds_[dim].first, localSpaceBounds_[dim].second);
+        }
+
+        double leftBound, rightBound;
+        const double startBound =
+            startMotion_->state->as<ompl::base::CompoundState>()->as<ompl::base::TimeStateSpace::StateType>(1)->position +
+            si_->getStateSpace()->as<ompl::base::SpaceTimeStateSpace>()->timeToCoverDistance(state, startMotion_->state);
+        if (sampleOldBatch_)
+        {
+            leftBound = startBound;
+            rightBound = std::numeric_limits<double>::min();
+            for (auto goal : goalMotions_)
+            {
+                const double t =
+                    goal->state->as<ompl::base::CompoundState>()->as<ompl::base::TimeStateSpace::StateType>(1)->position -
+                    si_->getStateSpace()->as<ompl::base::SpaceTimeStateSpace>()->timeToCoverDistance(goal->state, state);
+                if (t > rightBound)
+                {
+                    rightBound = t;
+                }
+            }
+        }
+        else
+        {
+            rightBound = std::numeric_limits<double>::min();
+            for (auto goal : newBatchGoalMotions_)
+            {
+                const double t =
+                    goal->state->as<ompl::base::CompoundState>()->as<ompl::base::TimeStateSpace::StateType>(1)->position -
+                    si_->getStateSpace()->as<ompl::base::SpaceTimeStateSpace>()->timeToCoverDistance(goal->state, state);
+                if (t > rightBound)
+                {
+                    rightBound = t;
+                }
+            }
+
+            leftBound = std::numeric_limits<double>::min();
+            for (auto goal : goalMotions_)
+            {
+                const double t =
+                    goal->state->as<ompl::base::CompoundState>()->as<ompl::base::TimeStateSpace::StateType>(1)->position -
+                    si_->getStateSpace()->as<ompl::base::SpaceTimeStateSpace>()->timeToCoverDistance(goal->state, state);
+                if (t > leftBound && t < rightBound)
+                {
+                    leftBound = t;
+                }
+            }
+            leftBound = std::max(leftBound, startBound);
+        }
+
+        if (leftBound <= rightBound)
+        {
+            state->as<ompl::base::CompoundState>()->as<ompl::base::TimeStateSpace::StateType>(1)->position =
+                rng_.uniformReal(leftBound, rightBound);
+            return true;
+        }
+    }
+    return false;
 }
 
 void ompl::geometric::STRRTstar::freeMemory()
@@ -303,7 +388,7 @@ ompl::base::PlannerStatus ompl::geometric::STRRTstar::solve(const ompl::base::Pl
         // *** End Goal Sampling ***
 
         /* sample random state */
-        bool success = sampler_.sample(rstate);
+        bool success = sampleState(rstate);
         if (!success)
         {
             forceGoalSample = true;
@@ -1276,4 +1361,18 @@ void ompl::geometric::STRRTstar::setMinimumGoalTime(double t)
 double ompl::geometric::STRRTstar::getMinimumGoalTime() const
 {
     return minimumGoalTime_;
+}
+
+void ompl::geometric::STRRTstar::setMaximumGoalTime(double t)
+{
+    if (t < 0.0)
+    {
+        OMPL_ERROR("%s: Maximum goal time needs to be non-negative.", getName().c_str());
+    }
+    maximumGoalTime_ = std::max(0.0, t);
+}
+
+double ompl::geometric::STRRTstar::getMaximumGoalTime() const
+{
+    return maximumGoalTime_;
 }
