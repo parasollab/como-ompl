@@ -21,6 +21,46 @@
 
 namespace ob = ompl::base;
 
+BOOST_AUTO_TEST_CASE(LegacyPandaBaseCoverageThroughOmplBridge)
+{
+    using Robot = vamp::robots::PandaLegacy59;
+    using Environment = vamp::collision::Environment<vamp::FloatVector<vamp::FloatVectorWidth>>;
+    BOOST_REQUIRE_EQUAL(Robot::n_spheres, 59U);
+
+    auto space = std::make_shared<ompl::vamp::VampStateSpace<Robot>>();
+    auto si = std::make_shared<ob::SpaceInformation>(space);
+    Environment env;
+    auto checker = std::make_shared<ompl::vamp::VampStateValidityChecker<Robot>>(si, env);
+    auto motion = std::make_shared<ompl::vamp::VampMotionValidator<Robot>>(si, env);
+    si->setStateValidityChecker(checker);
+    si->setMotionValidator(motion);
+    si->setup();
+
+    ob::ScopedState<> state(space);
+    const std::array<double, 7> ready{0., -0.785, 0., -2.356, 0., 1.571, 0.785};
+    for (std::size_t i = 0; i < ready.size(); ++i)
+        state[i] = ready[i];
+    BOOST_REQUIRE(checker->isValid(state.get()));
+    BOOST_REQUIRE(motion->checkMotion(state.get(), state.get()));
+
+    // The original model leaves this rear-tail location clear. This detects
+    // accidental use of the experimental 82 mm tail sphere by either bridge.
+    vamp::collision::Environment<float> obstacles;
+    obstacles.spheres.emplace_back(
+        vamp::collision::factory::sphere::array({-0.186F, 0.F, 0.035F}, 0.005F));
+    env = Environment(obstacles);
+    BOOST_CHECK(checker->isValid(state.get()));
+    BOOST_CHECK(motion->checkMotion(state.get(), state.get()));
+
+    // Both bridge entry points must still detect the original base sphere.
+    obstacles.spheres.clear();
+    obstacles.spheres.emplace_back(
+        vamp::collision::factory::sphere::array({0.F, 0.F, 0.050F}, 0.005F));
+    env = Environment(obstacles);
+    BOOST_CHECK(!checker->isValid(state.get()));
+    BOOST_CHECK(!motion->checkMotion(state.get(), state.get()));
+}
+
 BOOST_AUTO_TEST_CASE(DefaultPandaUsesRefined46ThroughBothValidators)
 {
     using Robot = vamp::robots::Panda;

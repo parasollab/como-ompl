@@ -18,6 +18,10 @@ namespace ompl::vamp
     // VAMP State Validity Checker for OMPL
     //==========================================================================
 
+    /// Uses Robot's compiled collision model, including its self-collision
+    /// exclusions. No URDF geometry is loaded by this bridge. The bundled Panda
+    /// alias selects ComoPanda's compiled Refined46 model. PandaLegacy59 remains
+    /// available explicitly through vamp/robots/panda_legacy59.hh.
     template <typename Robot, std::size_t rake = ::vamp::FloatVectorWidth>
     class VampStateValidityChecker : public ob::StateValidityChecker
     {

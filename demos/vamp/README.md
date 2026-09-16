@@ -2,6 +2,15 @@
 
 This directory includes demos using [VAMP](https://github.com/KavrakiLab/vamp) SIMD-accelerated state validity checks. VAMP uses robot-specific compiled forward kinematics operations and vectorized collision checking for state and motion validation.
 
+The default `panda` in this CoMotion fork is the compiled 46-sphere Refined46
+model (`vamp::robots::Panda`, an alias of `ComoPanda`, and Python `vamp.panda`).
+Its matching geometry is `external/vamp/resources/panda/como_panda_spherized.urdf`.
+To use the original 59-sphere model in a custom C++ setup, include
+`vamp/robots/panda_legacy59.hh` and instantiate all three OMPL bridge templates
+with `vamp::robots::PandaLegacy59`. In a Python setup select `vamp.panda_legacy59`
+for all three bridge objects. Merely loading a different URDF does not change
+the collision kernel used by these demos.
+
 ## C++
 
 ### Geometric Planning

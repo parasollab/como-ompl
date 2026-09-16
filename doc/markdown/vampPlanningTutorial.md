@@ -6,15 +6,22 @@ This tutorial shows how to use [VAMP](https://github.com/KavrakiLab/vamp) (Vecto
 
 VAMP ships with built-in support for several robots including the Franka Panda, UR5, and Fetch. In this tutorial we will plan for a 7-DOF Panda arm navigating around sphere obstacles. In this tutorial we use the Python bindings for OMPL. There is also a pure C++ version of this demo; see [VAMPPlanning.cpp](VAMPPlanning_8cpp_source.html).
 
-<div class="row justify-content-center"><div class="col-md-8 col-sm-8"><img src="images/vamp_sphere_cage.gif" class="img-fluid"><br><b>The Panda arm inside a cage of 14 sphere obstacles.</b></div></div>
+In this CoMotion fork, the bundled default Panda is **Refined46**, the 46-sphere
+visual-mesh model. C++ `vamp::robots::Panda` aliases `vamp::robots::ComoPanda`
+from `vamp/robots/como_panda.hh`; Python `vamp.panda` uses the same compiled
+model. Its sphere URDF is `external/vamp/resources/panda/como_panda_spherized.urdf`.
+Both the state checker and motion validator use the selected robot's compiled
+FKCC and self-collision exclusions. Loading another URDF does not replace that
+kernel. The Refined46 source has a 0.1 mm coverage audit against the visual
+triangles and component-centroid filled fans; motion validation still samples
+the edge at the robot's configured resolution.
 
-In this CoMotion fork, `vamp::robots::Panda` aliases `ComoPanda`, the 46-sphere
-Refined46 model compiled in `vamp/robots/como_panda.hh`. Both state and motion
-validators use that kernel. Its matching URDF is
-`external/vamp/resources/panda/como_panda_spherized.urdf`. The original model
-remains available explicitly in C++ as `PandaLegacy59` from
-`vamp/robots/panda_legacy59.hh`. Loading a different URDF does not change the
-compiled model.
+The original 59-sphere model remains available for explicit comparisons: include
+`vamp/robots/panda_legacy59.hh` and set `using Robot = vamp::robots::PandaLegacy59`
+in C++, or select `vamp.panda_legacy59` in Python. Use the same selection for the
+state space, state validity checker, and motion validator.
+
+<div class="row justify-content-center"><div class="col-md-8 col-sm-8"><img src="images/vamp_sphere_cage.gif" class="img-fluid"><br><b>The Panda arm inside a cage of 14 sphere obstacles.</b></div></div>
 
 ## Prerequisites
 
