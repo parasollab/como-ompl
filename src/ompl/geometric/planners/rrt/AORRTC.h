@@ -116,7 +116,7 @@ namespace ompl
 
             /** \brief Attempt to simplify the current solution path. Stop computation when \e ptc becomes true at the
              * latest. */
-            void simplifySolution(const base::PathPtr &p, const base::PlannerTerminationCondition &ptc);
+            virtual void simplifySolution(const base::PathPtr &p, const base::PlannerTerminationCondition &ptc);
 
             /** \brief Retrieve the best exact-solution cost found.*/
             ompl::base::Cost bestCost() const;
