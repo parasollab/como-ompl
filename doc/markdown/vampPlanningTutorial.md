@@ -8,6 +8,14 @@ VAMP ships with built-in support for several robots including the Franka Panda, 
 
 <div class="row justify-content-center"><div class="col-md-8 col-sm-8"><img src="images/vamp_sphere_cage.gif" class="img-fluid"><br><b>The Panda arm inside a cage of 14 sphere obstacles.</b></div></div>
 
+In this CoMotion fork, `vamp::robots::Panda` aliases `ComoPanda`, the 46-sphere
+Refined46 model compiled in `vamp/robots/como_panda.hh`. Both state and motion
+validators use that kernel. Its matching URDF is
+`external/vamp/resources/panda/como_panda_spherized.urdf`. The original model
+remains available explicitly in C++ as `PandaLegacy59` from
+`vamp/robots/panda_legacy59.hh`. Loading a different URDF does not change the
+compiled model.
+
 ## Prerequisites
 
 Install the required Python packages:

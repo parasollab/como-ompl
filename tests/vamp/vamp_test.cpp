@@ -28,6 +28,7 @@ using Environment = vamp::collision::Environment<vamp::FloatVector<vamp::FloatVe
 
 BOOST_AUTO_TEST_CASE(VAMPPlanning)
 {
+    BOOST_REQUIRE_EQUAL(Robot::n_spheres, 46U);
     // Build a simple sphere obstacle environment
     vamp::collision::Environment<float> env_float;
 
@@ -77,6 +78,9 @@ BOOST_AUTO_TEST_CASE(VAMPPlanning)
 
     // Setup problem definition
     ss.setStartAndGoalStates(start, goal);
+    ss.setup();
+    BOOST_REQUIRE(si->isValid(start.get()));
+    BOOST_REQUIRE(si->isValid(goal.get()));
 
     // Solve with 5 second timeout
     auto start_time = std::chrono::steady_clock::now();
@@ -86,4 +90,6 @@ BOOST_AUTO_TEST_CASE(VAMPPlanning)
     auto duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
     auto duration_ms = duration_ns / 1e6;
     BOOST_TEST(status == ob::PlannerStatus::EXACT_SOLUTION);
+    if (status == ob::PlannerStatus::EXACT_SOLUTION)
+        BOOST_CHECK(ss.getSolutionPath().check());
 }

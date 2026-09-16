@@ -3,17 +3,75 @@
 #include <cstring>
 #include <iostream>
 #include <array>
+#include <type_traits>
 #include <vector>
 
 // VAMP robot types for testing
 #include <vamp/robots/panda.hh>
+#include <vamp/robots/panda_legacy59.hh>
+#include <vamp/collision/factory.hh>
 
 // OMPL includes for state conversion testing
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/ScopedState.h>
+#include <ompl/vamp/VampStateSpace.h>
+#include <ompl/vamp/VampStateValidityChecker.h>
+#include <ompl/vamp/VampMotionValidator.h>
 
 namespace ob = ompl::base;
+
+BOOST_AUTO_TEST_CASE(DefaultPandaUsesRefined46ThroughBothValidators)
+{
+    using Robot = vamp::robots::Panda;
+    using Legacy = vamp::robots::PandaLegacy59;
+    using Environment = vamp::collision::Environment<vamp::FloatVector<vamp::FloatVectorWidth>>;
+    static_assert(std::is_same_v<Robot, vamp::robots::ComoPanda>);
+    BOOST_REQUIRE_EQUAL(Robot::n_spheres, 46U);
+    BOOST_REQUIRE_EQUAL(Legacy::n_spheres, 59U);
+
+    auto space = std::make_shared<ompl::vamp::VampStateSpace<Robot>>();
+    auto si = std::make_shared<ob::SpaceInformation>(space);
+    Environment env;
+    auto checker = std::make_shared<ompl::vamp::VampStateValidityChecker<Robot>>(si, env);
+    auto motion = std::make_shared<ompl::vamp::VampMotionValidator<Robot>>(si, env);
+    si->setStateValidityChecker(checker);
+    si->setMotionValidator(motion);
+    si->setup();
+    ompl::vamp::VampStateValidityChecker<Legacy> legacy_checker(si, env);
+    ompl::vamp::VampMotionValidator<Legacy> legacy_motion(si, env);
+
+    ob::ScopedState<> start(space), goal(space);
+    const std::array<double, 7> ready{0., -0.785, 0., -2.356, 0., 1.571, 0.785};
+    for (std::size_t i = 0; i < ready.size(); ++i)
+        start[i] = goal[i] = ready[i];
+    goal[0] += 0.02;
+    BOOST_REQUIRE(si->isValid(start.get()));
+    BOOST_REQUIRE(si->isValid(goal.get()));
+    BOOST_REQUIRE(si->checkMotion(start.get(), goal.get()));
+    BOOST_REQUIRE(legacy_checker.isValid(start.get()));
+    BOOST_REQUIRE(legacy_checker.isValid(goal.get()));
+    BOOST_REQUIRE(legacy_motion.checkMotion(start.get(), goal.get()));
+
+    // Refined46 covers this rear-base location that Legacy59 leaves unmodeled.
+    // A nonzero edge ensures the motion bridge also calls the selected FKCC.
+    vamp::collision::Environment<float> obstacles;
+    obstacles.spheres.emplace_back(
+        vamp::collision::factory::sphere::array({-0.155F, 0.F, 0.024F}, 0.001F));
+    env = Environment(obstacles);
+    BOOST_CHECK(!si->isValid(start.get()));
+    BOOST_CHECK(!si->isValid(goal.get()));
+    BOOST_CHECK(!si->checkMotion(start.get(), goal.get()));
+    BOOST_CHECK(!si->checkMotion(goal.get(), start.get()));
+    BOOST_CHECK(legacy_checker.isValid(start.get()));
+    BOOST_CHECK(legacy_checker.isValid(goal.get()));
+    BOOST_CHECK(legacy_motion.checkMotion(start.get(), goal.get()));
+    BOOST_CHECK(legacy_motion.checkMotion(goal.get(), start.get()));
+
+    std::pair<ob::State *, double> last_valid{nullptr, 0.};
+    BOOST_CHECK(!motion->checkMotion(start.get(), goal.get(), last_valid));
+    BOOST_CHECK(legacy_motion.checkMotion(start.get(), goal.get(), last_valid));
+}
 
 // Test VAMP target availability and linking
 BOOST_AUTO_TEST_CASE(VampTargetLinkingTest)
