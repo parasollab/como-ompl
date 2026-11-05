@@ -43,6 +43,8 @@
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
 
 #include "ompl/base/Path.h"
+#include "ompl/geometric/PathGeometric.h"
+#include <functional>
 
 namespace ompl
 {
@@ -132,9 +134,23 @@ namespace ompl
                 setup();
             }
 
-            /** \brief Check if the inner loop planner met its  condition to terminate */
+            // Execution cost may differ from geometric steering distance. Lower
+            // bounds remain geometric and must be admissible for this cost.
+            using ExecutionCost = std::function<double(const base::State *, const base::State *)>;
+            void setExecutionCost(ExecutionCost cost) { executionCost_ = std::move(cost); }
+            void setCandidateValidator(std::function<bool(const PathGeometric &)> validator)
+            { candidateValidator_ = std::move(validator); }
+            void setContinuousSearch(bool enabled) { continuousSearch_ = enabled; }
+            std::size_t sampleCount() const { return sampleAttempts; }
+            std::size_t vertexCount() const { return tStart_->size() + tGoal_->size(); }
+            std::size_t resetCount() const { return resetCount_; }
+            std::size_t rejectedCandidateCount() const { return rejectedCandidates_; }
+
+            /** \brief Check if the inner loop planner met its condition to terminate */
             bool internalResetCondition()
             {
+                if (continuousSearch_)
+                    return false;
                 bool shouldReset = false;
                 if (tStart_ && tGoal_)
                 {
@@ -174,6 +190,14 @@ namespace ompl
             }
 
         protected:
+            double executionCost(const base::State *a, const base::State *b) const
+            { return executionCost_ ? executionCost_(a, b) : si_->distance(a, b); }
+            ExecutionCost executionCost_;
+            std::function<bool(const PathGeometric &)> candidateValidator_;
+            bool continuousSearch_{false};
+            std::size_t resetCount_{0};
+            std::size_t rejectedCandidates_{0};
+
             /** \brief Representation of a motion */
             class Motion
             {

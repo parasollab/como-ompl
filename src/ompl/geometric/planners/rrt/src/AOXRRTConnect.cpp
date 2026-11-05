@@ -120,6 +120,7 @@ void ompl::geometric::AOXRRTConnect::freeMemory()
 
 void ompl::geometric::AOXRRTConnect::reset(bool solvedProblem)
 {
+    ++resetCount_;
     tStart_->clear();
     tGoal_->clear();
 
@@ -161,6 +162,14 @@ void ompl::geometric::AOXRRTConnect::setPathCost(double pc)
 {
     bestCost_ = base::Cost(pc);
     opt_->setCostThreshold(bestCost_);
+    // The optional execution-cost adapter sets its bound after setup, before
+    // inserting roots. Select the cost-space metric without resetting a tree.
+    if (executionCost_ && tStart_ && tGoal_ && tStart_->size() == 0 && tGoal_->size() == 0 &&
+        std::isfinite(pc))
+    {
+        tStart_->setDistanceFunction([this](const Motion *a, const Motion *b) { return aoxDistanceFunction(a, b); });
+        tGoal_->setDistanceFunction([this](const Motion *a, const Motion *b) { return aoxDistanceFunction(a, b); });
+    }
 }
 
 ompl::geometric::AOXRRTConnect::Motion *ompl::geometric::AOXRRTConnect::findNeighbour(Motion *sampled_motion,
@@ -180,7 +189,7 @@ ompl::geometric::AOXRRTConnect::Motion *ompl::geometric::AOXRRTConnect::findNeig
 
     int idx = 0;
     nearest_motion = nearest_vec[idx];
-    auto nearest_distance = si_->distance(sampled_motion->state, nearest_motion->state);
+    auto nearest_distance = executionCost(nearest_motion->state, sampled_motion->state);
 
     while (nearest_motion->cost > 0 && sampled_motion->cost < nearest_motion->cost + nearest_distance)
     {
@@ -188,7 +197,7 @@ ompl::geometric::AOXRRTConnect::Motion *ompl::geometric::AOXRRTConnect::findNeig
         if (static_cast<std::size_t>(idx) >= nearest_vec.size())
             return nullptr;
         nearest_motion = nearest_vec[idx];
-        nearest_distance = si_->distance(sampled_motion->state, nearest_motion->state);
+        nearest_distance = executionCost(nearest_motion->state, sampled_motion->state);
     }
 
     return nearest_motion;
@@ -263,7 +272,7 @@ ompl::geometric::AOXRRTConnect::GrowState ompl::geometric::AOXRRTConnect::growTr
         {
             remaining_resample_attempts--;
 
-            auto new_cost = si_->distance(nmotion->state, dstate) + nmotion->cost;
+            auto new_cost = executionCost(nmotion->state, dstate) + nmotion->cost;
             double c_range = new_cost - g_hat;
             double cost_sample = rng_.uniformReal(0, 1);
             double c_rand = (cost_sample * c_range) + g_hat;
@@ -277,7 +286,7 @@ ompl::geometric::AOXRRTConnect::GrowState ompl::geometric::AOXRRTConnect::growTr
                 break;
             }
 
-            if (new_cost <= si_->distance(n_nmotion->state, dstate) + n_nmotion->cost || c_range == 0)
+            if (new_cost <= executionCost(n_nmotion->state, dstate) + n_nmotion->cost || c_range == 0)
             {
                 validMotion = false;
             }
@@ -287,7 +296,7 @@ ompl::geometric::AOXRRTConnect::GrowState ompl::geometric::AOXRRTConnect::growTr
 
                 if (validMotion)
                 {
-                    new_cost = si_->distance(n_nmotion->state, dstate) + n_nmotion->cost;
+                    new_cost = executionCost(n_nmotion->state, dstate) + n_nmotion->cost;
                     nmotion = n_nmotion;
                     reach = true;
                 }
@@ -299,7 +308,7 @@ ompl::geometric::AOXRRTConnect::GrowState ompl::geometric::AOXRRTConnect::growTr
     si_->copyState(motion->state, dstate);
     motion->parent = nmotion;
     motion->root = nmotion->root;
-    motion->cost = si_->distance(nmotion->state, motion->state) + nmotion->cost;
+    motion->cost = executionCost(nmotion->state, motion->state) + nmotion->cost;
     tree->add(motion);
 
     tgi.xmotion = motion;
@@ -501,6 +510,18 @@ ompl::base::PlannerStatus ompl::geometric::AOXRRTConnect::solve(const base::Plan
                     }
                 }
 
+                // Check the actual edge execution cost before terminating the
+                // search. A rejected connection retains both growing trees.
+                double execution_cost = 0.0;
+                for (std::size_t i = 1; i < path->getStateCount(); ++i)
+                    execution_cost += executionCost(path->getState(i - 1), path->getState(i));
+                if ((executionCost_ && execution_cost >= bestCost_.value()) ||
+                    (candidateValidator_ && !candidateValidator_(*path)))
+                {
+                    ++rejectedCandidates_;
+                    gs = TRAPPED;
+                    continue;
+                }
                 pdef_->addSolutionPath(path, false, 0.0, getName());
                 foundPath = path;
 
