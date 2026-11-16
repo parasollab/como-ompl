@@ -43,6 +43,9 @@
 #include "ompl/base/samplers/InformedStateSampler.h"
 
 #include <stdexcept>
+#include <unordered_set>
+#include <memory>
+#include <cmath>
 
 ompl::geometric::AOXRRTConnect::AOXRRTConnect(const base::SpaceInformationPtr &si) : base::Planner(si, "AOXRRTConnect")
 {
@@ -104,6 +107,7 @@ void ompl::geometric::AOXRRTConnect::freeMemory()
                 si_->freeState(motion->state);
             delete motion;
         }
+        tStart_->clear();
     }
 
     if (tGoal_)
@@ -115,12 +119,15 @@ void ompl::geometric::AOXRRTConnect::freeMemory()
                 si_->freeState(motion->state);
             delete motion;
         }
+        tGoal_->clear();
     }
 }
 
 void ompl::geometric::AOXRRTConnect::reset(bool solvedProblem)
 {
     ++resetCount_;
+    freeMemory();
+    incrementalEffort_ = false;
     tStart_->clear();
     tGoal_->clear();
 
@@ -160,16 +167,45 @@ void ompl::geometric::AOXRRTConnect::reset(bool solvedProblem)
 
 void ompl::geometric::AOXRRTConnect::setPathCost(double pc)
 {
+    const bool wasUnbounded = !std::isfinite(bestCost_.value());
     bestCost_ = base::Cost(pc);
     opt_->setCostThreshold(bestCost_);
-    // The optional execution-cost adapter sets its bound after setup, before
-    // inserting roots. Select the cost-space metric without resetting a tree.
-    if (executionCost_ && tStart_ && tGoal_ && tStart_->size() == 0 && tGoal_->size() == 0 &&
-        std::isfinite(pc))
+    // Changing the metric on populated GNAT indexes rebuilds them without
+    // dropping motions. This also covers an unbounded initial search.
+    if (executionCost_ && tStart_ && tGoal_ && wasUnbounded && std::isfinite(pc))
     {
         tStart_->setDistanceFunction([this](const Motion *a, const Motion *b) { return aoxDistanceFunction(a, b); });
         tGoal_->setDistanceFunction([this](const Motion *a, const Motion *b) { return aoxDistanceFunction(a, b); });
     }
+}
+
+std::size_t ompl::geometric::AOXRRTConnect::pruneToCost(double inclusiveBound)
+{
+    if (!std::isfinite(inclusiveBound)) return 0;
+    std::size_t removed = 0;
+    connectionPoint_ = {nullptr, nullptr};
+    for (const auto &entry : {std::make_pair(tStart_, goalState), std::make_pair(tGoal_, startState)})
+    {
+        if (!entry.first || !entry.second) continue;
+        std::vector<Motion *> motions;
+        entry.first->list(motions);
+        std::unordered_set<Motion *> keep;
+        const double tolerance = 32 * std::numeric_limits<double>::epsilon() *
+                                 std::max(1.0, std::abs(inclusiveBound));
+        for (auto *motion : motions)
+        {
+            if (!motion->parent || motion->cost + si_->distance(motion->state, entry.second) <= inclusiveBound + tolerance)
+                for (auto *ancestor = motion; ancestor && keep.insert(ancestor).second; ancestor = ancestor->parent) {}
+        }
+        if (keep.size() == motions.size()) continue;
+        entry.first->clear();
+        for (auto *motion : motions)
+        {
+            if (keep.count(motion)) entry.first->add(motion);
+            else { si_->freeState(motion->state); delete motion; ++removed; }
+        }
+    }
+    return removed;
 }
 
 ompl::geometric::AOXRRTConnect::Motion *ompl::geometric::AOXRRTConnect::findNeighbour(Motion *sampled_motion,
@@ -325,16 +361,22 @@ ompl::base::PlannerStatus ompl::geometric::AOXRRTConnect::solve(const base::Plan
 
     _ptc = ptc;
 
-    TreeGrowingInfo tgi;
-    tgi.xstate = si_->allocState();
+    TreeGrowingInfo tgi{};
+    tgi.start = startTree_;
+    const auto freeState = [this](base::State *state) { si_->freeState(state); };
+    std::unique_ptr<base::State, decltype(freeState)> scratch(si_->allocState(), freeState);
+    tgi.xstate = scratch.get();
 
     Motion *approxsol = nullptr;
     double approxdif = std::numeric_limits<double>::infinity();
-    auto *rmotion = new Motion(si_);
-    auto *cmotion = new Motion(si_);
+    const auto freeMotion = [this](Motion *motion) { si_->freeState(motion->state); delete motion; };
+    std::unique_ptr<Motion, decltype(freeMotion)> randomMotion(new Motion(si_), freeMotion);
+    std::unique_ptr<Motion, decltype(freeMotion)> connectMotion(new Motion(si_), freeMotion);
+    auto *rmotion = randomMotion.get();
+    auto *cmotion = connectMotion.get();
     base::State *rstate = rmotion->state;
     bool solved = false;
-    GrowState gs;
+    GrowState gs = TRAPPED;
 
     if (goal == nullptr)
     {
@@ -592,11 +634,7 @@ ompl::base::PlannerStatus ompl::geometric::AOXRRTConnect::solve(const base::Plan
         gs = growTree(temp_tree, tgi, rmotion);
     }
 
-    /* Cleanup our memory */
-    si_->freeState(tgi.xstate);
-    si_->freeState(rstate);
-    delete rmotion;
-    delete cmotion;
+    // Scratch states are released on every exit, including invalid queries.
 
     OMPL_INFORM("%s: Created %u states (%u start + %u goal)", getName().c_str(), tStart_->size() + tGoal_->size(),
                 tStart_->size(), tGoal_->size());

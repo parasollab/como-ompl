@@ -146,9 +146,25 @@ namespace ompl
             std::size_t resetCount() const { return resetCount_; }
             std::size_t rejectedCandidateCount() const { return rejectedCandidates_; }
 
+            /** Limit additional work in the next solve call, preserving existing trees. */
+            void setAdditionalEffortLimits(std::size_t samples, std::size_t vertices)
+            {
+                incrementalEffort_ = true;
+                episodeSamples_ = sampleAttempts;
+                episodeVertices_ = vertexCount();
+                additionalSamples_ = samples;
+                additionalVertices_ = vertices;
+            }
+
+            /** Prune against an inclusive execution-cost bound; keep connected roots. */
+            std::size_t pruneToCost(double inclusiveBound);
+
             /** \brief Check if the inner loop planner met its condition to terminate */
             bool internalResetCondition()
             {
+                if (incrementalEffort_)
+                    return (additionalSamples_ && sampleAttempts - episodeSamples_ >= additionalSamples_) ||
+                           (additionalVertices_ && vertexCount() - episodeVertices_ >= additionalVertices_);
                 if (continuousSearch_)
                     return false;
                 bool shouldReset = false;
@@ -197,6 +213,9 @@ namespace ompl
             bool continuousSearch_{false};
             std::size_t resetCount_{0};
             std::size_t rejectedCandidates_{0};
+            bool incrementalEffort_{false};
+            std::size_t episodeSamples_{0}, episodeVertices_{0};
+            std::size_t additionalSamples_{0}, additionalVertices_{0};
 
             /** \brief Representation of a motion */
             class Motion
